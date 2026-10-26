@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: raw_pharmacy
+    schema: raw
+    tables:
+      - name: patients
+      - name: medicines
+      - name: pharmacies
+      - name: sales
+      - name: prescriptions
+      - name: reviews
