@@ -223,3 +223,11 @@ data_lake/
 logs/
 .user.yml
 env.ps1
+
+airflow/airflow.cfg
+airflow/airflow.db
+airflow/airflow.db-shm
+airflow/airflow.db-wal
+airflow/logs/
+airflow/webserver_config.py
+airflow/simple_auth_manager_passwords.json.generated
