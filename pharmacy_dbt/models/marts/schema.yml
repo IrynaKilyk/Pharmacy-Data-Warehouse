@@ -1,0 +1,11 @@
+version: 2
+
+models:
+  - name: fct_sales
+    description: "Fact table with all pharmacy sales, linked to patients, medicines and pharmacies."
+    columns:
+      - name: sale_id
+        description: "Unique sale identifier"
+        tests:
+          - unique
+          - not_null
