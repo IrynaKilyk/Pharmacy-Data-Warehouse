@@ -1,8 +1,9 @@
 # Pharmacy Data Warehouse
 
-Labs 1-3 of the *Data Warehouse Technologies* course: a Data Lake, an ingestion (Extract & Load) layer, a transformation layer (dbt) and pipeline orchestration (Apache Airflow) for a pharmacy chain, following the ELT approach.
+Labs 1-4 of the *Data Warehouse Technologies* course: a Data Lake, an ingestion (Extract & Load) layer, a transformation layer (dbt), pipeline orchestration (Apache Airflow) and a BI layer (Metabase) for a pharmacy chain, following the ELT approach.
 
 The project generates synthetic transactional data, stores it as Parquet files (a simulated Data Lake), loads it **as is** into the `raw` schema of a PostgreSQL data warehouse running in Docker, cleans and models it with **dbt** into a star schema in the `analytics` schema, and runs the whole flow daily with **Airflow**, including data quality tests.
+The marts are visualised in a **Metabase** BI dashboard, and dbt generates documentation with a **data lineage** graph.
 
 ## Architecture
 
@@ -12,7 +13,9 @@ Airflow DAG: pharmacy_elt_pipeline (@daily)
 extract_and_load_raw_data  -->  dbt_run_transformations  -->  dbt_test
   (PythonOperator)               (BashOperator)                (BashOperator)
 
-Python (Faker + Pandas) -> Parquet (data_lake/) -> PostgreSQL (raw) -> dbt (staging -> marts, schema: analytics) -> dbt tests
+Python (Faker + Pandas) -> Parquet (data_lake/) -> PostgreSQL (raw)
+  -> dbt (staging -> marts, schema: analytics) -> dbt tests
+  -> Metabase dashboard
 ```
 
 ![Airflow DAG graph](docs/airflow_graph.png)
@@ -26,6 +29,7 @@ Python (Faker + Pandas) -> Parquet (data_lake/) -> PostgreSQL (raw) -> dbt (stag
 - dbt-core, dbt-postgres
 - Apache Airflow 3
 - Docker / Docker Compose, PostgreSQL 16
+- Metabase (BI dashboards)
 
 > Airflow does not run natively on Windows. On Windows use **WSL2** (Ubuntu) for Lab 3 and keep the project inside the Linux file system (for example `~/pharmacy-data-warehouse`), not under `/mnt/c` or OneDrive.
 
@@ -79,6 +83,7 @@ pharmacy_dbt/
     │   ├── stg_prescriptions.sql
     │   └── stg_reviews.sql
     └── marts/                # star schema (tables)
+        ├── schema.yml        # model descriptions and tests
         ├── dim_patients.sql
         ├── dim_medicines.sql
         ├── dim_pharmacies.sql
@@ -107,11 +112,58 @@ pharmacy_dbt/
 
 ### Data quality tests
 
-Tests are defined in `models/staging/schema.yml` and run by `dbt test` (the last task of the DAG):
+Tests are defined in `models/staging/schema.yml` and `models/marts/schema.yml` and run by `dbt test` (the last task of the DAG):
 
 | Model | Column | Tests |
 |---|---|---|
 | `stg_patients` | `patient_id` | `unique`, `not_null` |
+| `fct_sales` | `sale_id` | `unique`, `not_null` |
+
+## Results (Lab 4)
+
+### BI dashboard (Metabase)
+
+Interactive dashboard **Pharmacy Sales Overview** built on top of the `analytics` schema (`fct_sales` joined with `dim_patients`, `dim_medicines`, `dim_pharmacies`):
+
+![Metabase dashboard](images/dashboard.png)
+
+| Chart | Type | Description |
+|---|---|---|
+| Total Units Sold / Average Check / Total Revenue | KPI | key business metrics |
+| Quarterly Sales Dynamics | Line | number of sales per quarter |
+| Monthly Revenue | Line | sum of `total_amount` per month |
+| Top 10 Pharmacies by Revenue | Bar | join with `dim_pharmacies` |
+| Top 10 Medicines by Revenue | Row | join with `dim_medicines` |
+| Top 5 Patients by Purchase Count | Bar | join with `dim_patients` |
+| Sales Status Breakdown | Donut | completed / pending / cancelled |
+
+A dashboard-level **Date filter** is connected to all cards.
+
+**Key insights**
+
+- About 80% of sales are `completed`, 15% `pending` and 4.9% `cancelled`.
+- Total revenue is about $3.5M with an average check of about $710.
+- Paracetamol, Naproxen and Loratadine generate the highest revenue.
+- The drop in the last month/quarter is an artifact: the current period is incomplete.
+
+### Data lineage (dbt docs)
+
+![dbt data lineage](images/lineage.png)
+
+The graph shows the full path: `raw_pharmacy` sources -> `stg_*` staging models -> `dim_*` and `fct_sales` marts.
+`stg_prescriptions` and `stg_reviews` are not used in marts yet (planned next step).
+
+To generate and open the documentation:
+
+```bash
+dbt docs generate --project-dir pharmacy_dbt --profiles-dir pharmacy_dbt
+dbt docs serve    --project-dir pharmacy_dbt --profiles-dir pharmacy_dbt --port 8081
+```
+
+### Running Metabase
+
+Metabase starts together with PostgreSQL (`docker compose up -d`) and is available at http://localhost:3000.
+When adding the database, use host `dwh_postgres` (the Docker Compose service name, not `localhost`), port `5432`, database `pharmacy_dwh` and the credentials from your `.env`. Charts use the `analytics` schema.
 
 ## Airflow pipeline
 
@@ -130,23 +182,15 @@ The task `extract_and_load_raw_data` uses `TRUNCATE` + append instead of `DROP`,
 ## Project structure
 
 ```
-pharmacy-data-warehouse/
-├── airflow/
-│   └── dags/
-│       ├── pharmacy_pipeline.py      # the DAG
-│       └── scripts/
-│           └── data_generator.py     # generate data + load to PostgreSQL (used by the DAG)
 ├── pharmacy_dbt/                     # dbt project (staging + marts + tests)
 ├── docs/
 │   └── airflow_graph.png             # screenshot of the successful DAG run
+├── images/
+│   ├── dashboard.png                 # Metabase dashboard screenshot
+│   └── lineage.png                   # dbt data lineage screenshot
 ├── data_generator.py                 # standalone generator (Lab 1)
 ├── load_to_dwh.py                    # standalone loader (Lab 1)
-├── docker-compose.yml                # PostgreSQL service
-├── .dist.env                         # template for environment variables
-├── requirements.txt
-├── .gitignore
-├── LICENSE
-└── README.md
+├── docker-compose.yml                # PostgreSQL + Metabase services
 ```
 
 ## Getting started
@@ -190,12 +234,13 @@ Open `.env` and set your own values:
 
 The `.env` file is ignored by git and must never be committed.
 
-### 4. Start PostgreSQL
+### 4. Start PostgreSQL and Metabase
 
 ```bash
 docker compose up -d
 docker ps
 ```
+Metabase will be available at http://localhost:3000.
 
 The container should have the status `Up`.
 
@@ -269,7 +314,7 @@ Commit messages follow the Conventional Commits style (`feat:`, `fix:`, `docs:`,
 - [x] Lab 1: Data Lake and Ingestion (Extract & Load)
 - [x] Lab 2: transformations with dbt (staging and star schema)
 - [x] Lab 3: orchestration with Apache Airflow and data quality tests
-- [ ] Lab 4: BI dashboards with Metabase
+- [x] Lab 4: BI dashboards with Metabase, dbt docs and data lineage
 
 ## License
 
