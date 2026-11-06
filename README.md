@@ -1,9 +1,18 @@
 # Pharmacy Data Warehouse
 
-Labs 1-4 of the *Data Warehouse Technologies* course: a Data Lake, an ingestion (Extract & Load) layer, a transformation layer (dbt), pipeline orchestration (Apache Airflow) and a BI layer (Metabase) for a pharmacy chain, following the ELT approach.
+An end-to-end **ELT analytics pipeline** for a pharmacy chain: synthetic transactional data is generated with Python, stored in a Parquet data lake, loaded into a PostgreSQL data warehouse, modelled with **dbt** into a star schema, orchestrated daily with **Airflow** and explored in a **Metabase** BI dashboard.
 
-The project generates synthetic transactional data, stores it as Parquet files (a simulated Data Lake), loads it **as is** into the `raw` schema of a PostgreSQL data warehouse running in Docker, cleans and models it with **dbt** into a star schema in the `analytics` schema, and runs the whole flow daily with **Airflow**, including data quality tests.
-The marts are visualised in a **Metabase** BI dashboard, and dbt generates documentation with a **data lineage** graph.
+The project answers typical business questions of a pharmacy chain: how revenue develops over time, which pharmacies and medicines bring the most money, who the most active patients are and how many sales are completed, pending or cancelled.
+
+## What this project demonstrates
+
+- **Data engineering:** ELT design, data lake (Parquet), raw / staging / marts layers, star schema, idempotent loads
+- **Data quality:** intentionally dirty source data cleaned in dbt, automated tests, documentation and data lineage generated from code
+- **Orchestration:** a daily Airflow DAG (load, transform, test)
+- **BI and analytics:** KPI cards, trends, rankings and a status breakdown in a dashboard with a date filter, built on SQL joins over the star schema
+- **Engineering practice:** Docker Compose, environment variables, Conventional Commits, documented setup
+
+> The data is **synthetic** (generated with Faker), so the numbers illustrate the analysis and do not describe a real company.
 
 ## Architecture
 
@@ -31,7 +40,48 @@ Python (Faker + Pandas) -> Parquet (data_lake/) -> PostgreSQL (raw)
 - Docker / Docker Compose, PostgreSQL 16
 - Metabase (BI dashboards)
 
-> Airflow does not run natively on Windows. On Windows use **WSL2** (Ubuntu) for Lab 3 and keep the project inside the Linux file system (for example `~/pharmacy-data-warehouse`), not under `/mnt/c` or OneDrive.
+> Airflow does not run natively on Windows. On Windows use **WSL2** (Ubuntu) for the Airflow part and keep the project inside the Linux file system (for example `~/pharmacy-data-warehouse`), not under `/mnt/c` or OneDrive.
+
+## Results
+
+### BI dashboard (Metabase)
+
+Interactive dashboard **Pharmacy Sales Overview** built on top of the `analytics` schema (`fct_sales` joined with `dim_patients`, `dim_medicines`, `dim_pharmacies`):
+
+![Metabase dashboard](images/dashboard.png)
+
+| Chart | Type | Description |
+|---|---|---|
+| Total Units Sold / Average Check / Total Revenue | KPI | key business metrics |
+| Quarterly Sales Dynamics | Line | number of sales per quarter |
+| Monthly Revenue | Line | sum of `total_amount` per month |
+| Top 10 Pharmacies by Revenue | Bar | join with `dim_pharmacies` |
+| Top 10 Medicines by Revenue | Row | join with `dim_medicines` |
+| Top 5 Patients by Purchase Count | Bar | join with `dim_patients` |
+| Sales Status Breakdown | Donut | completed / pending / cancelled |
+
+A dashboard-level **Date filter** is connected to all cards.
+
+**Key insights**
+
+- About 80% of sales are `completed`, 15% `pending` and 4.9% `cancelled`.
+- Total revenue is about $3.5M with an average check of about $710.
+- Paracetamol, Naproxen and Loratadine generate the highest revenue.
+- The drop in the last month or quarter is an artifact: the current period is incomplete.
+
+### Data lineage (dbt docs)
+
+![dbt data lineage](images/lineage.png)
+
+The graph shows the full path: `raw_pharmacy` sources -> `stg_*` staging models -> `dim_*` and `fct_sales` marts.
+`stg_prescriptions` and `stg_reviews` are not used in marts yet (see the roadmap).
+
+To generate and open the documentation:
+
+```bash
+dbt docs generate --project-dir pharmacy_dbt --profiles-dir pharmacy_dbt
+dbt docs serve    --project-dir pharmacy_dbt --profiles-dir pharmacy_dbt --port 8081
+```
 
 ## Data model (raw layer)
 
@@ -57,7 +107,7 @@ Fact tables reference the dimensions through foreign keys: `patient_id`, `medici
 
 ### Intentionally "dirty" data
 
-The Raw layer keeps data exactly as it comes from the source, so the following issues are generated on purpose and handled in the dbt staging layer:
+The raw layer keeps data exactly as it comes from the source, so the following issues are generated on purpose and handled in the dbt staging layer:
 
 - about 10% of pharmacies have a `NULL` address
 - about 5% of pharmacies are duplicated rows
@@ -119,52 +169,6 @@ Tests are defined in `models/staging/schema.yml` and `models/marts/schema.yml` a
 | `stg_patients` | `patient_id` | `unique`, `not_null` |
 | `fct_sales` | `sale_id` | `unique`, `not_null` |
 
-## Results (Lab 4)
-
-### BI dashboard (Metabase)
-
-Interactive dashboard **Pharmacy Sales Overview** built on top of the `analytics` schema (`fct_sales` joined with `dim_patients`, `dim_medicines`, `dim_pharmacies`):
-
-![Metabase dashboard](images/dashboard.png)
-
-| Chart | Type | Description |
-|---|---|---|
-| Total Units Sold / Average Check / Total Revenue | KPI | key business metrics |
-| Quarterly Sales Dynamics | Line | number of sales per quarter |
-| Monthly Revenue | Line | sum of `total_amount` per month |
-| Top 10 Pharmacies by Revenue | Bar | join with `dim_pharmacies` |
-| Top 10 Medicines by Revenue | Row | join with `dim_medicines` |
-| Top 5 Patients by Purchase Count | Bar | join with `dim_patients` |
-| Sales Status Breakdown | Donut | completed / pending / cancelled |
-
-A dashboard-level **Date filter** is connected to all cards.
-
-**Key insights**
-
-- About 80% of sales are `completed`, 15% `pending` and 4.9% `cancelled`.
-- Total revenue is about $3.5M with an average check of about $710.
-- Paracetamol, Naproxen and Loratadine generate the highest revenue.
-- The drop in the last month/quarter is an artifact: the current period is incomplete.
-
-### Data lineage (dbt docs)
-
-![dbt data lineage](images/lineage.png)
-
-The graph shows the full path: `raw_pharmacy` sources -> `stg_*` staging models -> `dim_*` and `fct_sales` marts.
-`stg_prescriptions` and `stg_reviews` are not used in marts yet (planned next step).
-
-To generate and open the documentation:
-
-```bash
-dbt docs generate --project-dir pharmacy_dbt --profiles-dir pharmacy_dbt
-dbt docs serve    --project-dir pharmacy_dbt --profiles-dir pharmacy_dbt --port 8081
-```
-
-### Running Metabase
-
-Metabase starts together with PostgreSQL (`docker compose up -d`) and is available at http://localhost:3000.
-When adding the database, use host `dwh_postgres` (the Docker Compose service name, not `localhost`), port `5432`, database `pharmacy_dwh` and the credentials from your `.env`. Charts use the `analytics` schema.
-
 ## Airflow pipeline
 
 The DAG `pharmacy_elt_pipeline` is defined in `airflow/dags/pharmacy_pipeline.py` and runs daily.
@@ -182,15 +186,26 @@ The task `extract_and_load_raw_data` uses `TRUNCATE` + append instead of `DROP`,
 ## Project structure
 
 ```
+pharmacy-data-warehouse/
+├── airflow/
+│   └── dags/
+│       ├── pharmacy_pipeline.py      # the DAG
+│       └── scripts/
+│           └── data_generator.py     # generate data + load to PostgreSQL (used by the DAG)
 ├── pharmacy_dbt/                     # dbt project (staging + marts + tests)
 ├── docs/
 │   └── airflow_graph.png             # screenshot of the successful DAG run
 ├── images/
 │   ├── dashboard.png                 # Metabase dashboard screenshot
 │   └── lineage.png                   # dbt data lineage screenshot
-├── data_generator.py                 # standalone generator (Lab 1)
-├── load_to_dwh.py                    # standalone loader (Lab 1)
+├── data_generator.py                 # standalone generator
+├── load_to_dwh.py                    # standalone loader
 ├── docker-compose.yml                # PostgreSQL + Metabase services
+├── .dist.env                         # template for environment variables
+├── requirements.txt
+├── .gitignore
+├── LICENSE
+└── README.md
 ```
 
 ## Getting started
@@ -240,11 +255,12 @@ The `.env` file is ignored by git and must never be committed.
 docker compose up -d
 docker ps
 ```
-Metabase will be available at http://localhost:3000.
 
-The container should have the status `Up`.
+Both containers should have the status `Up`. Metabase is available at http://localhost:3000.
 
-### 5. Run the pipeline manually (Labs 1-2)
+When adding the database in Metabase, use host `dwh_postgres` (the Docker Compose service name, not `localhost`), port `5432`, database `pharmacy_dwh` and the credentials from your `.env`. Charts use the `analytics` schema.
+
+### 5. Run the pipeline manually
 
 ```bash
 python airflow/dags/scripts/data_generator.py     # generate Parquet files and load them into raw
@@ -255,7 +271,7 @@ dbt run   --project-dir pharmacy_dbt --profiles-dir pharmacy_dbt
 dbt test  --project-dir pharmacy_dbt --profiles-dir pharmacy_dbt
 ```
 
-### 6. Run the pipeline with Airflow (Lab 3)
+### 6. Run the pipeline with Airflow
 
 In every new terminal activate the environment first:
 
@@ -295,7 +311,7 @@ docker exec -it pharmacy-data-warehouse-dwh_postgres-1 psql -U <POSTGRES_USER> -
 | `analytics.fct_sales` rows | 5000 |
 | `dbt test` | all tests pass |
 
-To stop the database:
+To stop the containers:
 
 ```bash
 docker compose down        # keeps the data volume
@@ -311,10 +327,13 @@ Commit messages follow the Conventional Commits style (`feat:`, `fix:`, `docs:`,
 
 ## Roadmap
 
-- [x] Lab 1: Data Lake and Ingestion (Extract & Load)
-- [x] Lab 2: transformations with dbt (staging and star schema)
-- [x] Lab 3: orchestration with Apache Airflow and data quality tests
-- [x] Lab 4: BI dashboards with Metabase, dbt docs and data lineage
+- [x] Data lake and ingestion (extract and load)
+- [x] Transformations with dbt (staging and star schema)
+- [x] Orchestration with Apache Airflow and data quality tests
+- [x] BI dashboard with Metabase, dbt docs and data lineage
+- [ ] More dbt tests: `relationships` between `fct_sales` and the dimensions, `accepted_values` for `sale_status`
+- [ ] Marts for prescriptions and reviews (`fct_prescriptions`, `fct_reviews`) so that all staging models are used
+- [ ] A folder with analytical SQL queries (CTEs, window functions)
 
 ## License
 
